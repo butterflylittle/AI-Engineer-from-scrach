@@ -1,0 +1,158 @@
+<title>Agentic RAG 检索图</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Sora:wght@600;700&display=swap">
+<style>
+  :root {
+    --bg: #f5f8fa;
+    --panel: #ffffff;
+    --ink: #16212e;
+    --muted: #57636f;
+    --faint: #8a94a0;
+    --line: #d9e0e7;
+    --accent: #0e7c7b;
+    --loop: #c07a17;
+    --edge: #9aa4af;
+    --tint-accent: #e7f2f1;
+    --tint-loop: #faf0df;
+    --tint-muted: #eef1f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f141a;
+      --panel: #161d25;
+      --ink: #e7edf4;
+      --muted: #9aa7b5;
+      --faint: #6e7986;
+      --line: #28313b;
+      --accent: #3cc2bd;
+      --loop: #e0a548;
+      --edge: #7c8793;
+      --tint-accent: #122827;
+      --tint-loop: #2b2315;
+      --tint-muted: #1c232b;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f141a;
+    --panel: #161d25;
+    --ink: #e7edf4;
+    --muted: #9aa7b5;
+    --faint: #6e7986;
+    --line: #28313b;
+    --accent: #3cc2bd;
+    --loop: #e0a548;
+    --edge: #7c8793;
+    --tint-accent: #122827;
+    --tint-loop: #2b2315;
+    --tint-muted: #1c232b;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    line-height: 1.5;
+  }
+  .page { max-width: 1080px; margin: 0 auto; padding: 44px 24px 72px; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; letter-spacing: .04em;
+    color: var(--faint); margin: 0 0 14px;
+  }
+  h1 {
+    font-family: "Sora", "IBM Plex Sans", sans-serif;
+    font-size: 30px; font-weight: 700; letter-spacing: -0.01em;
+    margin: 0 0 10px; text-wrap: balance;
+  }
+  .lede { max-width: 62ch; margin: 0; color: var(--muted); font-size: 15px; }
+
+  .diagram {
+    margin: 26px 0 6px;
+    padding: 22px 18px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+    overflow-x: auto;
+  }
+  .diagram .mermaid { display: flex; justify-content: center; margin: 0; }
+  .figcap { font-size: 13px; color: var(--faint); margin: 10px 2px 0; max-width: 66ch; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 10px 22px;
+    margin: 22px 0 30px; padding: 16px 18px;
+    border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  }
+  .legend .item { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--muted); }
+  .swatch { width: 26px; height: 0; border-top-width: 3px; border-top-style: solid; flex: 0 0 auto; }
+  .sw-a { border-top-color: var(--accent); }
+  .sw-l { border-top-color: var(--loop); }
+  .sw-m { border-top-color: var(--edge); border-top-style: dashed; }
+
+  .section-label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--faint); margin: 0 0 14px;
+  }
+  .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .field { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 12px 14px; }
+  .field .node { font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 600; color: var(--accent); letter-spacing: .02em; }
+  .field .node.node-loop { color: var(--loop); }
+  .field code { display: block; margin-top: 5px; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink); word-break: break-all; }
+  .note { margin-top: 22px; font-size: 13px; color: var(--muted); max-width: 66ch; }
+  .note code { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink); }
+</style>
+
+<div class="page">
+  <p class="eyebrow">02-RAG / 07-agentic-rag / services/api/app/agent/graph.py</p>
+  <h1>Agentic RAG 检索图</h1>
+  <p class="lede">路由先判断是否需要检索；检索链路 retrieve → rerank → grade；证据不足时 rewrite 改写查询后重试，最多 max_rewrite_rounds 轮。问候语直答分支绕过检索。</p>
+
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+    START([START]) --> route{route&lt;br/&gt;意图路由}
+    route -- "需要检索" --> retrieve[retrieve&lt;br/&gt;向量检索]
+    route -- "问候直答" --> generate[generate&lt;br/&gt;生成回答]
+    retrieve --> rerank[rerank&lt;br/&gt;重排序]
+    rerank --> grade{grade&lt;br/&gt;相关性评分}
+    grade -- "证据充分 / 轮次已满" --> generate
+    grade -- "证据不足" --> rewrite[rewrite&lt;br/&gt;查询改写]
+    rewrite -- "重写后重试" --> retrieve
+    generate --> END([END])
+
+    classDef decision fill:#e7f2f1,stroke:#0e7c7b,color:#16212e,stroke-width:2px
+    classDef process fill:#ffffff,stroke:#9aa4af,color:#16212e
+    classDef retry fill:#faf0df,stroke:#c07a17,color:#16212e,stroke-width:2px
+    classDef terminal fill:#eef1f4,stroke:#8a94a0,color:#57636f
+    class route,grade decision
+    class retrieve,rerank,generate process
+    class rewrite retry
+    class START,END terminal
+
+    linkStyle 1,3,4,5 stroke:#0e7c7b,stroke-width:2px
+    linkStyle 2 stroke:#9aa4af,stroke-width:1.5px,stroke-dasharray:5
+    linkStyle 6,7 stroke:#c07a17,stroke-width:2px
+    </pre>
+  </div>
+  <p class="figcap">graph.py 的 build_graph() 编译出的状态图：六个节点 + 两个条件分支 + 一个改写重试环。</p>
+
+  <div class="legend">
+    <div class="item"><span class="swatch sw-a"></span>检索主链路（route → retrieve → rerank → grade → generate）</div>
+    <div class="item"><span class="swatch sw-l"></span>改写重试环（grade → rewrite → retrieve）</div>
+    <div class="item"><span class="swatch sw-m"></span>问候直答分支（route → generate，绕过检索）</div>
+  </div>
+
+  <p class="section-label">各节点写入 RagState 的字段</p>
+  <div class="fields">
+    <div class="field"><span class="node">route</span><code>requires_retrieval: bool</code></div>
+    <div class="field"><span class="node">retrieve</span><code>retrieved_documents</code></div>
+    <div class="field"><span class="node">rerank</span><code>reranked_documents</code></div>
+    <div class="field"><span class="node">grade</span><code>evidence_sufficient: bool</code></div>
+    <div class="field"><span class="node node-loop">rewrite</span><code>rewritten_query · rewrite_rounds +1</code></div>
+    <div class="field"><span class="node">generate</span><code>answer · citations</code></div>
+  </div>
+
+  <p class="note">两个阈值来自配置：<code>grade</code> 用 <code>relevance_threshold</code> 判断首条重排结果是否足够相关；<code>after_grade</code> 在证据充分或 <code>rewrite_rounds ≥ max_rewrite_rounds</code> 时终止循环。</p>
+</div>

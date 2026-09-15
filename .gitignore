@@ -46,8 +46,9 @@ chromadb/
 *.sqlite3
 # Python 练习脚本写出的报告
 10-CICD/09-writing/shell/log/04-python/out/
+# Deep Agents 进阶示例生成的本地工作区
+15-deepagent/workspace/
 # Temp Office files
 ~$*
 _scan_secrets.py
 _redact_secrets.py
-
