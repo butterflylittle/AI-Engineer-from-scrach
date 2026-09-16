@@ -267,6 +267,8 @@ async def chat(
     async def event_stream():
         trace_id = str(uuid4())
         started = time.perf_counter()
+        # Expose the committed ID before generation so an interrupted stream can be resumed.
+        yield sse("conversation", {"conversation_id": conversation.id})
         # 注入检索器 / 重排器 / LLM，编译状态图
         graph = build_graph(
             PgVectorRetriever(session, get_embedding_provider()), get_reranker(), get_llm_provider()

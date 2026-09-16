@@ -7,16 +7,25 @@ import {
   Check,
   FileText,
   LoaderCircle,
+  MessageSquarePlus,
   Paperclip,
   Sparkles,
   Trash2,
   UploadCloud,
 } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
+import {
+  chatCacheKey,
+  chatKeyAction,
+  clearChatCache,
+  getChatStorage,
+  readChatCache,
+  writeChatCache,
+} from "@/lib/chat";
 import type { ChatMessage, Citation, DocumentItem, KnowledgeBase } from "@/types";
 
 const stages: Record<string, string> = {
@@ -28,11 +37,17 @@ const stages: Record<string, string> = {
   generate: "Composing a grounded answer",
 };
 
-export function KnowledgeWorkspace({ knowledgeBaseId }: { knowledgeBaseId: string }) {
+export function KnowledgeWorkspace({ knowledgeBaseId, userId }: { knowledgeBaseId: string; userId: string }) {
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
+  const messageRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController>(null);
+  const askingRef = useRef(false);
+  const cacheKey = chatCacheKey(userId, knowledgeBaseId);
+  const storage = getChatStorage();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string>();
+  const [draft, setDraft] = useState("");
   const [stage, setStage] = useState("");
   const [asking, setAsking] = useState(false);
   const [chatError, setChatError] = useState("");
@@ -62,6 +77,15 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: { knowledgeBaseId: strin
 
   const current = knowledgeBases.find((item) => item.id === knowledgeBaseId);
 
+  useEffect(() => {
+    const cached = readChatCache(storage, cacheKey);
+    if (!cached) return;
+    setMessages(cached.messages);
+    setConversationId(cached.conversationId);
+  }, [cacheKey, storage]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   async function openCitation(citation: Citation) {
     const response = await apiFetch(`/api/documents/${citation.document_id}/content`);
     const url = URL.createObjectURL(await response.blob());
@@ -71,19 +95,27 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: { knowledgeBaseId: strin
 
   async function ask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const question = String(data.get("message") ?? "").trim();
-    if (!question || asking) return;
-    form.reset();
+    const question = draft.trim();
+    if (!question || askingRef.current) return;
+    askingRef.current = true;
+    setDraft("");
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: question };
     const answerId = crypto.randomUUID();
-    setMessages((items) => [...items, userMessage, { id: answerId, role: "assistant", content: "", citations: [] }]);
+    const sentMessages = [...messages, userMessage];
+    setMessages([...sentMessages, { id: answerId, role: "assistant", content: "", citations: [] }]);
+    writeChatCache(storage, cacheKey, sentMessages, conversationId);
     setAsking(true);
     setChatError("");
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let activeConversationId = conversationId;
+    let answer = "";
+    let citations: Citation[] = [];
+    let completed = false;
     try {
       const response = await apiFetch("/api/chat", {
         method: "POST",
+        signal: controller.signal,
         body: JSON.stringify({
           conversation_id: conversationId,
           knowledge_base_id: knowledgeBaseId,
@@ -94,7 +126,6 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: { knowledgeBaseId: strin
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let citations: Citation[] = [];
       while (true) {
         const { value, done } = await reader.read();
         buffer += decoder.decode(value, { stream: !done });
@@ -103,26 +134,57 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: { knowledgeBaseId: strin
         for (const frame of frames) {
           const eventName = frame.match(/^event: (.+)$/m)?.[1];
           const payload = JSON.parse(frame.match(/^data: (.+)$/m)?.[1] ?? "{}");
+          if (eventName === "conversation") {
+            activeConversationId = payload.conversation_id;
+            setConversationId(activeConversationId);
+            writeChatCache(storage, cacheKey, sentMessages, activeConversationId);
+          }
           if (eventName === "status") setStage(stages[payload.stage] ?? payload.stage);
           if (eventName === "citation") {
             citations = [...citations, payload];
             setMessages((items) => items.map((item) => item.id === answerId ? { ...item, citations } : item));
           }
           if (eventName === "token") {
-            setMessages((items) => items.map((item) => item.id === answerId ? { ...item, content: item.content + payload.text } : item));
+            answer += payload.text;
+            setMessages((items) => items.map((item) => item.id === answerId ? { ...item, content: answer } : item));
           }
-          if (eventName === "done") setConversationId(payload.conversation_id);
+          if (eventName === "done") {
+            activeConversationId = payload.conversation_id;
+            const completedMessages = [...sentMessages, { id: answerId, role: "assistant" as const, content: answer, citations }];
+            completed = true;
+            setConversationId(activeConversationId);
+            setMessages(completedMessages);
+            writeChatCache(storage, cacheKey, completedMessages, activeConversationId);
+          }
           if (eventName === "error") throw new Error(payload.message);
         }
         if (done) break;
       }
+      if (!completed) throw new Error("Connection closed before the answer completed");
     } catch (error) {
-      setChatError(error instanceof Error ? error.message : "Unable to answer");
+      setMessages(sentMessages);
+      writeChatCache(storage, cacheKey, sentMessages, activeConversationId);
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setChatError(error instanceof Error ? error.message : "Unable to answer");
+      }
     } finally {
+      askingRef.current = false;
+      abortRef.current = null;
       setAsking(false);
       setStage("");
     }
   }
+
+  function startNewConversation() {
+    if (askingRef.current) return;
+    setMessages([]);
+    setConversationId(undefined);
+    setDraft("");
+    setChatError("");
+    clearChatCache(storage, cacheKey);
+  }
+
+  const canSend = draft.trim().length > 0 && !asking;
 
   return (
     <main className="workspace-shell">
@@ -160,7 +222,10 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: { knowledgeBaseId: strin
         <p className="rail-foot"><Sparkles size={14} /> Agentic search chooses when retrieval is needed.</p>
       </aside>
       <section className="chat-room">
-        <header className="chat-head"><div className="live-dot" /><span>Grounded assistant</span><small>Sources only</small></header>
+        <header className="chat-head">
+          <div className="live-dot" /><span>Grounded assistant</span><small>Sources only</small>
+          <button className="new-chat" type="button" onClick={startNewConversation} disabled={asking} aria-label="New conversation" title="New conversation"><MessageSquarePlus size={16} /></button>
+        </header>
         <div className="messages">
           {!messages.length && (
             <div className="chat-welcome">
@@ -171,8 +236,8 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: { knowledgeBaseId: strin
               <div className="suggestions">
                 {["Summarize the main ideas", "What claims need evidence?", "Compare the uploaded sources"].map((text) => (
                   <button key={text} onClick={() => {
-                    const textarea = document.querySelector<HTMLTextAreaElement>("textarea[name=message]");
-                    if (textarea) { textarea.value = text; textarea.focus(); }
+                    setDraft(text);
+                    messageRef.current?.focus();
                   }}>{text}</button>
                 ))}
               </div>
@@ -195,8 +260,22 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: { knowledgeBaseId: strin
           {chatError && <p className="error-note">{chatError}</p>}
         </div>
         <form className="composer" onSubmit={ask}>
-          <textarea name="message" rows={2} placeholder={documents.some((item) => item.status === "ready") ? "Ask a question about your sources…" : "Upload a source, or say hello…"} aria-label="Message" />
-          <Button type="submit" size="icon" disabled={asking} aria-label="Send message"><ArrowUp size={18} /></Button>
+          <textarea
+            ref={messageRef}
+            name="message"
+            rows={2}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              const action = chatKeyAction({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing }, canSend);
+              if (action === "default") return;
+              event.preventDefault();
+              if (action === "submit") event.currentTarget.form?.requestSubmit();
+            }}
+            placeholder={documents.some((item) => item.status === "ready") ? "Ask a question about your sources…" : "Upload a source, or say hello…"}
+            aria-label="Message"
+          />
+          <Button type="submit" size="icon" disabled={!canSend} aria-label="Send message"><ArrowUp size={18} /></Button>
           <span>Shift + Enter for a new line</span>
         </form>
       </section>

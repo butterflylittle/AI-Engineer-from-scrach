@@ -22,18 +22,21 @@ class EmbeddingProvider(ABC):
 # 远端实现：调用 OpenAI 兼容 /embeddings 接口（支持批量）
 class OpenAICompatibleEmbeddings(EmbeddingProvider):
     async def _embed(self, texts: list[str]) -> list[list[float]]:
+        vectors: list[list[float]] = []
         async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                f"{settings.embedding_api_base.rstrip('/')}/embeddings",
-                headers={"Authorization": f"Bearer {settings.embedding_api_key}"},
-                json={
-                    "model": settings.embedding_model,
-                    "input": texts,
-                    "dimensions": settings.embedding_dimensions,
-                },
-            )
-            response.raise_for_status()
-            return [item["embedding"] for item in response.json()["data"]]
+            for start in range(0, len(texts), 64):
+                response = await client.post(
+                    f"{settings.embedding_api_base.rstrip('/')}/embeddings",
+                    headers={"Authorization": f"Bearer {settings.embedding_api_key}"},
+                    json={
+                        "model": settings.embedding_model,
+                        "input": texts[start : start + 64],
+                        "dimensions": settings.embedding_dimensions,
+                    },
+                )
+                response.raise_for_status()
+                vectors.extend(item["embedding"] for item in response.json()["data"])
+        return vectors
 
     async def embed_query(self, text: str) -> list[float]:
         return (await self._embed([text]))[0]

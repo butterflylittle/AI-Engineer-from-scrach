@@ -142,6 +142,7 @@ button { cursor: pointer; }
 .rail-foot { margin-top: auto; display: flex; gap: 8px; color: var(--muted); font-size: 9px; line-height: 1.45; }.rail-foot svg { flex: none; color: var(--moss-deep); }
 .chat-room { min-width: 0; height: 100svh; display: grid; grid-template-rows: 64px 1fr auto; }
 .chat-head { padding: 0 34px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--line); font-size: 11px; font-weight: 700; }.chat-head small { margin-left: auto; color: var(--muted); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+.new-chat { display: grid; place-items: center; width: 34px; height: 34px; margin-left: 8px; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); transition: background .2s, color .2s; }.new-chat:hover { background: white; color: var(--ink); }.new-chat:disabled { cursor: not-allowed; opacity: .45; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #7c9b55; box-shadow: 0 0 0 4px rgba(124,155,85,.12); }
 .messages { width: min(780px, calc(100% - 48px)); margin: 0 auto; padding: 44px 0 24px; overflow-y: auto; }
 .chat-welcome { min-height: 100%; display: grid; place-items: center; align-content: center; text-align: center; animation: rise .65s both; }

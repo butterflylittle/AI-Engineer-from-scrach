@@ -11,12 +11,13 @@ from jose import JWTError, jwt
 from sqlalchemy.dialects import postgresql
 
 import app.auth as auth_module
+import app.providers.embeddings as embeddings_module
 from app.agent.graph import build_graph
 from app.auth import verify_token
 from app.config import settings
 from app.ingestion.parser import parse_document
 from app.ingestion.splitter import split_elements
-from app.providers.embeddings import LocalHashEmbeddings
+from app.providers.embeddings import LocalHashEmbeddings, OpenAICompatibleEmbeddings
 from app.providers.llm import LLMProvider
 from app.providers.reranker import LexicalReranker
 from app.retrieval.retriever import build_retrieval_statement
@@ -67,6 +68,37 @@ async def test_text_parser_and_splitter(monkeypatch):
 async def test_local_embedding_is_deterministic():
     provider = LocalHashEmbeddings()
     assert await provider.embed_query("same text") == await provider.embed_query("same text")
+
+
+async def test_remote_embeddings_are_batched(monkeypatch):
+    class FakeResponse:
+        def __init__(self, count: int):
+            self.count = count
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"embedding": [float(index)]} for index in range(self.count)]}
+
+    class FakeClient:
+        batch_sizes: list[int] = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers, json):
+            self.batch_sizes.append(len(json["input"]))
+            return FakeResponse(len(json["input"]))
+
+    fake = FakeClient()
+    monkeypatch.setattr(embeddings_module.httpx, "AsyncClient", lambda timeout: fake)
+    vectors = await OpenAICompatibleEmbeddings().embed_documents(["chunk"] * 124)
+    assert fake.batch_sizes == [64, 60]
+    assert len(vectors) == 124
 
 
 async def test_permission_filter_is_inside_vector_query():
