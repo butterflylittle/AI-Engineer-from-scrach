@@ -31,6 +31,11 @@ pip install -r requirements.txt
 DEEPSEEK_API_KEY=your-deepseek-api-key
 TAVILY_API_KEY=your-tavily-api-key
 
+# LangSmith：记录 LangGraph 节点、LLM 和工具调用
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your-langsmith-api-key
+LANGSMITH_PROJECT=agentic-chatbot-local
+
 # optional
 # DEEPSEEK_BASE_URL=https://api.deepseek.com
 # EMBEDDING_MODEL_NAME=BAAI/bge-small-en-v1.5
@@ -40,6 +45,29 @@ TAVILY_API_KEY=your-tavily-api-key
 ```
 
 > 天气工具复用 `TAVILY_API_KEY`，通过 Tavily 搜索获取实时天气。
+
+### 用 LangSmith 观察一次 Agent 运行
+
+LangGraph 已内置 LangSmith tracing 支持；本项目不需要增加回调或修改业务代码。
+
+1. 登录 [LangSmith](https://smith.langchain.com)，进入 **Settings → API Keys**。
+2. 本地学习建议创建 **Personal Access Token**，复制仅显示一次的 key，填入 `.env` 的 `LANGSMITH_API_KEY`。
+3. 正常启动应用并发送一条会触发工具的问题，例如“北京今天天气怎么样？”：
+
+```bash
+python -m streamlit run app.py
+```
+
+4. 回到 LangSmith 的 **Tracing**，打开 `agentic-chatbot-local` 项目。一次对话会显示为一条 trace；展开后可看到 `chat_node`、模型请求、工具调用和耗时。
+
+常用操作：
+
+- 临时停止上传：把 `LANGSMITH_TRACING` 改为 `false`，重启应用。
+- 按实验分组：修改 `LANGSMITH_PROJECT`，例如 `agentic-chatbot-rag-test`。
+- EU 数据区：增加 `LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com`。
+- key 可访问多个 workspace：再设置 `LANGSMITH_WORKSPACE_ID`。
+
+> Trace 会把提示词、回复和工具输入输出发送到 LangSmith。请勿用真实隐私数据或生产密钥做练习；`.env` 已被 git 忽略。
 
 > Embedding **懒加载**：普通聊天不加载 `torch`；首次上传 PDF / 调用 RAG 时才会加载。  
 > 权重目录：`models/bge-small-en-v1.5/`（可提前：`python scripts/download_embedding_model.py`）。  
